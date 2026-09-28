@@ -7,6 +7,8 @@ saving code lives in one place.
         n = hist.available_steps()
         hs = hist.read("hs", points=[1000, 2000], steps=slice(0, n))   # (time, points)
     save_fig(fig, "hs_timeseries", "eda")        # -> fig/eda/hs_timeseries.png
+    grid = load_grid()                            # coordinates of every sea point
+    p = nearest_point(grid, lat=45.0, lon=-30.0)  # point index for a location
 
 Scenario reads from the partial download (data/raw/<scenario>/EC-EARTH3.mat.part,
 via partial_reader.py) until the complete file EC-EARTH3.mat exists, then reads
@@ -99,6 +101,7 @@ class Scenario:
         if self._partial is not None:
             return self._partial.read(var, points, steps)
 
+        assert self._h5 is not None
         d = self._h5[var]
         if isinstance(points, slice):
             cols, inv = points, None
@@ -125,6 +128,75 @@ def assumed_times(n: int, start: str = "1985-01-01") -> np.ndarray:
     confirmed, and the ssp start dates are unknown. Label plots accordingly.
     """
     return np.datetime64(start, "h") + np.arange(n) * np.timedelta64(3, "h")
+
+
+# -- grid: which location each sea point is ---------------------------------------
+def load_grid(path=None, verbose: bool = True) -> dict:
+    """Coordinates of the 142,868 sea points, from SeaMask_WW3.mat.
+
+    Returns a dict with
+      lon, lat          1-D grid vectors (720 and 361 values)
+      mask              (lat, lon) bool array, True = sea
+      point_lon/lat     coordinates of each sea point (the data's point axis)
+      point_ilon/ilat   0-based grid indices of each sea point
+    Assumes the data's point axis is in the same order as SeaIdx/SeaJ/SeaK;
+    a map of any variable (see to_map) shows immediately if that's wrong.
+    """
+    import h5py
+    path = Path(path) if path else RAW / "SeaMask_WW3.mat"
+    with h5py.File(path, "r") as f:
+        lon = np.asarray(f["lon"][()], dtype=float).ravel()
+        lat = np.asarray(f["lat"][()], dtype=float).ravel()
+        J = np.asarray(f["SeaJ"][()]).ravel().astype(np.int64) - 1   # MATLAB is 1-based
+        K = np.asarray(f["SeaK"][()]).ravel().astype(np.int64) - 1
+        idx = np.asarray(f["SeaIdx"][()]).ravel().astype(np.int64) - 1
+        mask = np.asarray(f["SeaMask"][()]).astype(bool)
+    n_lon, n_lat = lon.size, lat.size
+    if J.max() < n_lon and K.max() < n_lat and J.max() >= n_lat:
+        ilon, ilat = J, K
+    elif K.max() < n_lon and J.max() < n_lat and K.max() >= n_lat:
+        ilon, ilat = K, J
+    else:
+        raise ValueError(f"can't tell which of SeaJ/SeaK is longitude "
+                         f"(max {J.max()}, {K.max()}; grid {n_lon} x {n_lat})")
+    if mask.shape == (n_lon, n_lat):
+        mask = mask.T
+    checks = {
+        "SeaIdx matches the grid indices": np.array_equal(idx, ilon + ilat * n_lon)
+                                           or np.array_equal(idx, ilat + ilon * n_lat),
+        "every point is sea in SeaMask": bool(mask[ilat, ilon].all()),
+        "SeaMask has exactly this many sea cells": int(mask.sum()) == J.size,
+    }
+    if verbose:
+        print(f"{J.size:,} sea points on a {n_lon} x {n_lat} grid "
+              f"(lon {lon.min():g} to {lon.max():g}, lat {lat.min():g} to {lat.max():g})")
+        for name, ok in checks.items():
+            print(f"  {'OK  ' if ok else 'FAIL'} {name}")
+    return {"lon": lon, "lat": lat, "mask": mask,
+            "point_ilon": ilon, "point_ilat": ilat,
+            "point_lon": lon[ilon], "point_lat": lat[ilat]}
+
+
+def nearest_point(grid: dict, lat: float, lon: float) -> int:
+    """Index of the sea point closest to (lat, lon). Longitude may be -180..180 or 0..360."""
+    dlon = (grid["point_lon"] - lon + 180.0) % 360.0 - 180.0
+    dlat = grid["point_lat"] - lat
+    d2 = dlat**2 + (dlon * np.cos(np.radians(lat)))**2
+    p = int(np.argmin(d2))
+    print(f"point {p}: lat {grid['point_lat'][p]:g}, lon {grid['point_lon'][p]:g} "
+          f"(~{111.2 * np.sqrt(d2[p]):.0f} km from the requested location)")
+    return p
+
+
+def to_map(grid: dict, values) -> np.ndarray:
+    """One value per sea point -> (lat, lon) array for plotting; land is NaN."""
+    values = np.asarray(values, dtype=float)
+    if values.shape != grid["point_lon"].shape:
+        raise ValueError(f"need one value per sea point ({grid['point_lon'].size:,}), "
+                         f"got shape {values.shape}")
+    field = np.full(grid["mask"].shape, np.nan)
+    field[grid["point_ilat"], grid["point_ilon"]] = values
+    return field
 
 
 # -- saving results --------------------------------------------------------------
