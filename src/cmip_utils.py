@@ -9,6 +9,8 @@ saving code lives in one place.
     save_fig(fig, "hs_timeseries", "eda")        # -> fig/eda/hs_timeseries.png
     grid = load_grid()                            # coordinates of every sea point
     p = nearest_point(grid, lat=45.0, lon=-30.0)  # point index for a location
+    st = period_stats("historical", "hs", slice(0, 29_220))   # per-point mean/std/p99
+    plot_map(grid, st["mean"], title="Mean Hs")
 
 Scenario reads from the partial download (data/raw/<scenario>/EC-EARTH3.mat.part,
 via partial_reader.py) until the complete file EC-EARTH3.mat exists, then reads
@@ -17,6 +19,8 @@ finishes.
 """
 from __future__ import annotations
 
+import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +32,9 @@ PROCESSED = ROOT / "data" / "processed"
 FIG = ROOT / "fig"
 
 SCENARIOS = ("historical", "ssp126", "ssp585")
+EXPECTED_SIZES = {"historical": 59_982_783_406, "ssp126": 60_656_201_821,
+                  "ssp585": 60_874_380_344}     # bytes of the complete files
+STEPS_PER_DAY = 8                               # 3-hourly (assumed, see assumed_times)
 
 # Inferred from value ranges and standard WaveWatch III names; confirm with Francesco.
 VARIABLES = {
@@ -85,6 +92,14 @@ class Scenario:
     @property
     def n_points(self) -> int:
         return self.shape[1]
+
+    @property
+    def chunks(self) -> tuple:
+        """HDF5 chunk shape (time steps, points) of the variables."""
+        if self.complete:
+            c = self._h5["hs"].chunks
+            return tuple(c) if c else None
+        return (self._partial.ct, self._partial.cp)
 
     def available_steps(self) -> int:
         """Time steps 0..n-1 are readable for every point and variable."""
@@ -199,12 +214,104 @@ def to_map(grid: dict, values) -> np.ndarray:
     return field
 
 
+# -- statistics over a period, computed in blocks --------------------------------
+def period_stats(scenario: str, var: str, steps: slice, q: float = 99.0,
+                 block_points: int = 1320, cache: bool = True,
+                 verbose: bool = True) -> dict:
+    """Per-point mean, standard deviation, q-th percentile and NaN fraction of `var`.
+
+    Reads `block_points` grid points at a time over all requested time steps, so
+    memory stays at a few hundred MB even for decades of data. The result is
+    cached in data/processed/stats/, so re-running a notebook is instant.
+    Returns a dict of 1-D arrays (one value per sea point): "mean", "std",
+    f"p{q:g}" (e.g. "p99") and "nan_frac".
+    """
+    t0 = steps.start or 0
+    t1 = steps.stop
+    pkey = f"p{q:g}"
+    path = PROCESSED / "stats" / f"{scenario}_{var}_{t0}-{t1}_{pkey}.npz"
+    if cache and path.exists():
+        z = np.load(path)
+        if verbose:
+            print(f"{scenario} {var}: loaded cached statistics ({path.name})")
+        return {k: z[k] for k in z.files}
+
+    with Scenario(scenario) as s:
+        n_avail = s.available_steps()
+        t1 = n_avail if t1 is None else t1
+        if t1 > n_avail:
+            raise ValueError(f"{scenario}: only steps 0..{n_avail - 1:,} are readable, "
+                             f"asked for up to {t1 - 1:,}")
+        P = s.n_points
+        out = {k: np.full(P, np.nan, np.float32) for k in ("mean", "std", pkey, "nan_frac")}
+        start, next_report = time.time(), 0.1
+        for b0 in range(0, P, block_points):
+            b1 = min(b0 + block_points, P)
+            x = s.read(var, slice(b0, b1), slice(t0, t1))          # (time, points)
+            nan = np.isnan(x)
+            out["nan_frac"][b0:b1] = nan.mean(axis=0)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)    # all-NaN points
+                out["mean"][b0:b1] = np.nanmean(x, axis=0, dtype=np.float64)
+                out["std"][b0:b1] = np.nanstd(x, axis=0, dtype=np.float64)
+                has_nan, all_nan = nan.any(axis=0), nan.all(axis=0)
+                pq = np.full(b1 - b0, np.nan)
+                if (~has_nan).any():                               # fast path
+                    pq[~has_nan] = np.percentile(x[:, ~has_nan], q, axis=0)
+                part = has_nan & ~all_nan
+                if part.any():
+                    pq[part] = np.nanpercentile(x[:, part], q, axis=0)
+            out[pkey][b0:b1] = pq
+            done = b1 / P
+            if verbose and (done >= next_report or b1 == P):
+                el = time.time() - start
+                print(f"  {scenario} {var}: {100 * done:5.1f}%  "
+                      f"({el / 60:.1f} min, ~{el / done * (1 - done) / 60:.1f} min left)",
+                      flush=True)
+                next_report += 0.1
+    if cache:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(path, **out)
+    return out
+
+
+def plot_map(grid: dict, values, ax=None, title: str = "", label: str = "",
+             cmap: str = "viridis", vmin=None, vmax=None, diverging: bool = False):
+    """Map of one value per sea point. Returns (fig, ax).
+
+    diverging=True: a red-blue colour scale centred on zero (for differences).
+    The data layer is rasterized, so PDFs stay small and fast.
+    """
+    import matplotlib.pyplot as plt
+    field = to_map(grid, values)
+    if diverging:
+        lim = vmax if vmax is not None else float(np.nanpercentile(np.abs(field), 99))
+        vmin, vmax, cmap = -lim, lim, ("RdBu_r" if cmap == "viridis" else cmap)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(11, 5))
+    else:
+        fig = ax.figure
+    im = ax.pcolormesh(grid["lon"], grid["lat"], field, shading="auto", cmap=cmap,
+                       vmin=vmin, vmax=vmax, rasterized=True)
+    fig.colorbar(im, ax=ax, label=label, shrink=0.85)
+    ax.set(title=title, xlabel="longitude [°E]", ylabel="latitude [°N]")
+    return fig, ax
+
+
+def area_mean(grid: dict, values) -> float:
+    """Area-weighted (cos latitude) mean over all sea points with a finite value."""
+    v = np.asarray(values, dtype=float)
+    w = np.cos(np.radians(grid["point_lat"]))
+    ok = np.isfinite(v)
+    return float(np.sum(v[ok] * w[ok]) / np.sum(w[ok]))
+
+
 # -- saving results --------------------------------------------------------------
-def save_fig(fig, name: str, subdir: str = "eda", formats=("png",), dpi: int = 300):
+def save_fig(fig, name: str, subdir: str = "eda", formats=("png", "pdf"), dpi: int = 300):
     """Save a matplotlib figure to fig/<subdir>/<name>.<ext>.
 
     Call before plt.show(); the figure still appears in the notebook.
-    Use formats=("png", "pdf") for vector figures in the report.
+    Saves PNG (email, slides, Word) and PDF (LaTeX report) by default.
     """
     out = FIG / subdir
     out.mkdir(parents=True, exist_ok=True)
