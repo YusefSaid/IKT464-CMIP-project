@@ -27,11 +27,18 @@ Run from the project root, in the background (one log per run):
 
 Existing outputs are skipped (use --force to recompute), so a restarted workspace
 only loses the scenario/variable that was running.
+
+Known damage: if data/raw/<scenario>/bad_chunks.csv (from scan_chunks.py) lists damaged
+chunks or index nodes, a full-period run is refused. --last-year Y limits the run to the
+years up to Y, and is only allowed if every damaged item lies after that year; the output
+is then named <scenario>_<var>_<first>-<Y>.npz, e.g.
+    .venv/bin/python src/compute_stats.py --scenarios ssp126 ssp585 --last-year 2098
 """
 from __future__ import annotations
 
 import argparse
 import calendar
+import csv
 import os
 import time
 from multiprocessing import Pool
@@ -153,29 +160,41 @@ def block_stats(x: np.ndarray, month_start: np.ndarray) -> dict:
 # --------------------------------------------------------------------------- workers
 _FILE = None
 _MONTH_START = None
+_END = None
 
 
-def _init_worker(path: str, month_start: np.ndarray):
-    global _FILE, _MONTH_START
+def _init_worker(path: str, month_start: np.ndarray, end: int):
+    global _FILE, _MONTH_START, _END
     _FILE = h5py.File(path, "r")
     _MONTH_START = month_start
+    _END = end
 
 
 def _work(task):
     var, b0, b1 = task
     stored, fn = VARIABLES[var]
     try:
-        x = fn(*(_FILE[v][:, b0:b1] for v in stored)).astype(np.float32, copy=False)
+        x = fn(*(_FILE[v][:_END, b0:b1] for v in stored)).astype(np.float32, copy=False)
     except Exception as e:                      # e.g. a corrupted chunk
         raise RuntimeError(f"reading {var} at sea points {b0}-{b1 - 1} failed: {e!r}") from e
     return b0, b1, block_stats(x, _MONTH_START)
 
 
-def run(scenario: str, var: str, workers: int, block: int, force: bool = False) -> Path:
-    out = OUT / f"{scenario}_{var}.npz"
-    if out.exists() and not force:
-        print(f"{out.name} exists, skipping (use --force to recompute)", flush=True)
-        return out
+def known_damage(scenario: str) -> list:
+    """Damaged items listed by scan_chunks.py for this file ([] if none or not scanned)."""
+    f = RAW / scenario / "bad_chunks.csv"
+    if not f.exists():
+        return []
+    with open(f) as fh:
+        return list(csv.DictReader(fh))
+
+
+def stats_name(scenario: str, var: str, period: str | None = None) -> Path:
+    return OUT / (f"{scenario}_{var}.npz" if period is None else f"{scenario}_{var}_{period}.npz")
+
+
+def run(scenario: str, var: str, workers: int, block: int, force: bool = False,
+        last_year: int | None = None) -> Path:
     path = raw_path(scenario)
     tax = time_axis(path)
     with h5py.File(path, "r") as f:
@@ -183,16 +202,46 @@ def run(scenario: str, var: str, workers: int, block: int, force: bool = False) 
     if n_steps != tax["n_steps"]:
         raise ValueError(f"{path}: {n_steps} steps in data but {tax['n_steps']} in metadata")
 
+    # period: whole file, or the years up to last_year
+    period = None
+    if last_year is not None and last_year < tax["years"][-1]:
+        keep = tax["year"] <= last_year
+        if not keep.any():
+            raise SystemExit(f"{scenario}: --last-year {last_year} is before the first year")
+        tax = {**tax, "year": tax["year"][keep], "month": tax["month"][keep],
+               "start": tax["start"][keep], "end": tax["end"][keep],
+               "years": np.unique(tax["year"][keep])}
+        period = f"{tax['years'][0]}-{tax['years'][-1]}"
+    end = int(tax["end"][-1])
+
+    # refuse to read anything listed as damaged
+    bad = known_damage(scenario)
+    if bad:
+        first = min(int(r["time_start"]) for r in bad)
+        if first < end:
+            ok_years = tax["year"][tax["end"] <= first]
+            hint = (f"use --last-year {ok_years.max()}" if ok_years.size else "repair it first")
+            raise SystemExit(f"{scenario}: bad_chunks.csv lists {len(bad)} damaged items from "
+                             f"time step {first:,}; this run needs steps up to {end - 1:,}. "
+                             f"Repair the file (repair_chunks.py, then rescan) or {hint}.")
+        print(f"{scenario}: {len(bad)} damaged items are all at steps >= {first:,}, "
+              f"after the {period} period used here - safe to read", flush=True)
+
+    out = stats_name(scenario, var, period)
+    if out.exists() and not force:
+        print(f"{out.name} exists, skipping (use --force to recompute)", flush=True)
+        return out
+
     n_years = len(tax["years"])
     shapes = {"annual_mean": (n_years, n_pts), "annual_max": (n_years, n_pts),
               "annual_valid": (n_years, n_pts), "monthly_mean": (12, n_pts)}
     res = {}
     tasks = [(var, b0, min(b0 + block, n_pts)) for b0 in range(0, n_pts, block)]
-    print(f"{scenario} {var}: {tax['years'][0]}-{tax['years'][-1]}, {n_steps:,} steps x "
+    print(f"{scenario} {var}: {tax['years'][0]}-{tax['years'][-1]}, {end:,} steps x "
           f"{n_pts:,} points, {len(tasks)} blocks, {workers} workers", flush=True)
 
     t0, done, next_report = time.time(), 0, 0.05
-    with Pool(workers, initializer=_init_worker, initargs=(str(path), tax["start"])) as pool:
+    with Pool(workers, initializer=_init_worker, initargs=(str(path), tax["start"], end)) as pool:
         for b0, b1, r in pool.imap_unordered(_work, tasks):
             for k, v in r.items():
                 if k not in res:
@@ -209,16 +258,33 @@ def run(scenario: str, var: str, workers: int, block: int, force: bool = False) 
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp.npz")
     np.savez_compressed(tmp, **res, years=tax["years"], months_of_year=np.arange(1, 13),
-                        quantiles=np.array(QUANTILES), scenario=scenario, var=var)
+                        quantiles=np.array(QUANTILES), scenario=scenario, var=var,
+                        period=f"{tax['years'][0]}-{tax['years'][-1]}")
     os.replace(tmp, out)                        # never leave a half-written result
     print(f"saved {out} ({(time.time() - t0) / 60:.1f} min)", flush=True)
     return out
 
 
-def load_stats(scenario: str, var: str = "hs") -> dict:
-    """Load the statistics written by run() as a dict of arrays."""
-    with np.load(OUT / f"{scenario}_{var}.npz") as z:
-        return {k: z[k] for k in z.files}
+def load_stats(scenario: str, var: str = "hs", period: str | None = None) -> dict:
+    """Load the statistics written by run() as a dict of arrays.
+
+    period=None loads the full-period file; e.g. period="2071-2098" a shortened run.
+    period="best" loads the full period if it exists, else the newest shortened run."""
+    if period == "best":
+        full = stats_name(scenario, var)
+        alts = sorted(OUT.glob(f"{scenario}_{var}_*-*.npz"))
+        period = None if full.exists() or not alts else alts[-1].stem.rsplit("_", 1)[1]
+    path = stats_name(scenario, var, period)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path.name} not found: compute it first, e.g.\n  .venv/bin/python src/compute_stats.py "
+            f"--scenarios {scenario} --vars {var}" + ("" if scenario == "historical" else
+            "  (add --last-year 2098 while the file's 2099-2100 stretch is damaged)"))
+    with np.load(path) as z:
+        d = {k: z[k] for k in z.files}
+    years = d["years"]
+    d["period"] = f"{years[0]}-{years[-1]}"
+    return d
 
 
 def main():
@@ -229,12 +295,14 @@ def main():
     ap.add_argument("--block", type=int, default=5 * CHUNK_POINTS,
                     help="sea points per task, a multiple of 66 (default 330)")
     ap.add_argument("--force", action="store_true", help="recompute existing outputs")
+    ap.add_argument("--last-year", type=int, default=None,
+                    help="use only the years up to this one (e.g. 2098 to skip damaged data)")
     a = ap.parse_args()
     if a.block % CHUNK_POINTS:
         ap.error(f"--block must be a multiple of {CHUNK_POINTS}")
     for var in a.vars:
         for s in a.scenarios:
-            run(s, var, a.workers, a.block, a.force)
+            run(s, var, a.workers, a.block, a.force, a.last_year)
 
 
 if __name__ == "__main__":
