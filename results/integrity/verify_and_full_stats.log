@@ -1,0 +1,56 @@
+nohup: ignoring input
+  index scan  17.5%  (0.1 min, 9,724 nodes)
+  index scan  35.1%  (0.2 min, 19,388 nodes)
+  index scan  52.6%  (0.2 min, 29,089 nodes)
+  index scan  70.2%  (0.3 min, 38,785 nodes)
+  index scan  87.7%  (0.4 min, 48,490 nodes)
+  index scan 100.0%  (0.4 min, 54,833 nodes)
+  fp: 766,410 of 766,410 chunks found in the index
+  hs: 766,410 of 766,410 chunks found in the index
+  uwnd: 766,410 of 766,410 chunks found in the index
+  vwnd: 766,410 of 766,410 chunks found in the index
+  3,065,640 chunks decompressed (fp, hs, uwnd, vwnd), 5860 damaged; 2.4 min in total
+ssp126: 0 damaged index nodes, 5860 damaged chunks -> /home/coder/IKT464-CMIP-project/data/raw/ssp126/bad_chunks.csv
+  chunk hs   steps 82,584+ points 7,524+ at byte 57,144,921,521 (33,581 B, 0% zeros)
+  chunk hs   steps 82,584+ points 7,590+ at byte 57,144,955,102 (34,130 B, 0% zeros)
+  chunk hs   steps 82,584+ points 7,656+ at byte 57,144,989,232 (36,646 B, 0% zeros)
+  chunk hs   steps 82,584+ points 7,788+ at byte 57,145,025,878 (34,077 B, 0% zeros)
+  chunk hs   steps 82,584+ points 7,854+ at byte 57,145,059,955 (34,031 B, 0% zeros)
+  chunk hs   steps 82,584+ points 7,920+ at byte 57,145,093,986 (35,388 B, 0% zeros)
+  chunk hs   steps 82,584+ points 7,986+ at byte 57,145,129,374 (34,764 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,118+ at byte 57,145,164,138 (34,019 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,184+ at byte 57,145,198,157 (33,436 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,250+ at byte 57,145,231,593 (33,758 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,316+ at byte 57,145,265,351 (34,732 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,448+ at byte 57,145,300,083 (34,399 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,514+ at byte 57,145,334,482 (33,852 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,580+ at byte 57,145,368,334 (35,048 B, 0% zeros)
+  chunk hs   steps 82,584+ points 8,646+ at byte 57,145,403,382 (35,278 B, 0% zeros)
+  index scan  17.5%  (0.1 min, 9,668 nodes)
+  index scan  35.1%  (0.2 min, 19,354 nodes)
+  index scan  52.6%  (0.2 min, 29,004 nodes)
+  index scan  70.2%  (0.3 min, 38,639 nodes)
+  index scan  87.7%  (0.4 min, 48,325 nodes)
+  index scan 100.0%  (0.4 min, 54,830 nodes)
+  fp: 766,410 of 766,410 chunks found in the index
+  hs: 766,410 of 766,410 chunks found in the index
+  uwnd: 766,410 of 766,410 chunks found in the index
+  vwnd: 766,410 of 766,410 chunks found in the index
+  3,065,640 chunks decompressed (fp, hs, uwnd, vwnd), 5474 damaged; 2.5 min in total
+ssp585: 0 damaged index nodes, 5474 damaged chunks -> /home/coder/IKT464-CMIP-project/data/raw/ssp585/bad_chunks.csv
+  chunk vwnd steps 82,336+ points 120,318+ at byte 57,310,477,414 (23,154 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,384+ at byte 57,310,500,568 (24,473 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,450+ at byte 57,310,525,041 (19,894 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,516+ at byte 57,310,544,935 (19,985 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,648+ at byte 57,310,564,920 (22,456 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,714+ at byte 57,310,587,376 (22,272 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,780+ at byte 57,310,609,648 (24,883 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,846+ at byte 57,310,634,531 (21,787 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 120,978+ at byte 57,310,656,318 (21,014 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 121,044+ at byte 57,310,677,332 (22,479 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 121,110+ at byte 57,310,699,811 (21,910 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 121,176+ at byte 57,310,721,721 (24,394 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 121,308+ at byte 57,310,746,115 (19,915 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 121,374+ at byte 57,310,766,030 (20,546 B, 0% zeros)
+  chunk vwnd steps 82,336+ points 121,440+ at byte 57,310,786,576 (22,716 B, 0% zeros)
+ssp126: bad_chunks.csv lists 5860 damaged items from time step 82,584; this run needs steps up to 87,655. Repair the file (repair_chunks.py, then rescan) or use --last-year 2099.
