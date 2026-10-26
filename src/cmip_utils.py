@@ -12,10 +12,7 @@ saving code lives in one place.
     st = period_stats("historical", "hs", slice(0, 29_220))   # per-point mean/std/p99
     plot_map(grid, st["mean"], title="Mean Hs")
 
-Scenario reads from the partial download (data/raw/<scenario>/EC-EARTH3.mat.part,
-via partial_reader.py) until the complete file EC-EARTH3.mat exists, then reads
-the complete file with h5py. Notebook code does not change when a download
-finishes.
+Scenario reads one complete data file (data/raw/<scenario>/EC-EARTH3.mat) with h5py.
 """
 from __future__ import annotations
 
@@ -47,41 +44,28 @@ VARIABLES = {
 
 # -- reading -------------------------------------------------------------------
 class Scenario:
-    """One scenario's data: complete .mat if downloaded, otherwise the partial file."""
+    """One scenario's data file, read with h5py."""
 
     def __init__(self, name: str):
         if name not in SCENARIOS:
             raise ValueError(f"scenario must be one of {SCENARIOS}")
         self.name = name
         full = RAW / name / "EC-EARTH3.mat"
-        self._h5 = self._partial = None
-        if full.exists():
-            import h5py
-            # bigger chunk cache: each chunk is ~64 KB, this holds ~4000 of them
-            self._h5 = h5py.File(full, "r", rdcc_nbytes=256 * 1024**2, rdcc_nslots=100_003)
-            self.complete = True
-            self.shape = self._h5["hs"].shape
-        else:
-            from partial_reader import PartialMat
-            part = str(full) + ".part"
-            if not Path(part + ".chunks.npz").exists():
-                raise FileNotFoundError(
-                    f"{name}: no complete file and no chunk index; run "
-                    f"src/scan_btree.py {Path(part).relative_to(ROOT)}")
-            self._partial = PartialMat(part)
-            self.complete = False
-            self.shape = (self._partial.T, self._partial.P)
+        if not full.exists():
+            raise FileNotFoundError(f"{name}: data file not found: {full}")
+        import h5py
+        # bigger chunk cache: each chunk is ~64 KB, this holds ~4000 of them
+        self._h5 = h5py.File(full, "r", rdcc_nbytes=256 * 1024**2, rdcc_nslots=100_003)
+        self.complete = True
+        self.shape = self._h5["hs"].shape
 
     def __repr__(self):
-        src = "complete file" if self.complete else "partial download"
-        return (f"Scenario({self.name!r}: {src}, {self.shape[0]:,} time steps x "
+        return (f"Scenario({self.name!r}: {self.shape[0]:,} time steps x "
                 f"{self.shape[1]:,} points, {self.available_steps():,} steps readable)")
 
     def close(self) -> None:
         if self._h5 is not None:
             self._h5.close()
-        if self._partial is not None:
-            self._partial.close()
 
     def __enter__(self):
         return self
@@ -96,14 +80,12 @@ class Scenario:
     @property
     def chunks(self) -> tuple:
         """HDF5 chunk shape (time steps, points) of the variables."""
-        if self.complete:
-            c = self._h5["hs"].chunks
-            return tuple(c) if c else None
-        return (self._partial.ct, self._partial.cp)
+        c = self._h5["hs"].chunks
+        return tuple(c) if c else None
 
     def available_steps(self) -> int:
         """Time steps 0..n-1 are readable for every point and variable."""
-        return self.shape[0] if self.complete else self._partial.available_steps()
+        return self.shape[0]
 
     def read(self, var: str, points, steps=slice(None)) -> np.ndarray:
         """float32 array of shape (len(steps), len(points)).
@@ -113,10 +95,6 @@ class Scenario:
         """
         if var not in VARIABLES:
             raise ValueError(f"var must be one of {list(VARIABLES)}")
-        if self._partial is not None:
-            return self._partial.read(var, points, steps)
-
-        assert self._h5 is not None
         d = self._h5[var]
         if isinstance(points, slice):
             cols, inv = points, None
