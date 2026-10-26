@@ -3,7 +3,7 @@
 Principle
     HDF5 finds each chunk through an index tree (a v1 B-tree) whose nodes start with
     the marker "TREE". If one node is damaged, HDF5 stops, so this script does not use
-    HDF5's own lookup. Like scan_btree.py, it scans the raw bytes for all index nodes
+    HDF5's own lookup. It scans the raw bytes for all index nodes
     and then checks three things:
       1. every node a parent node points to is a valid node (else: a damaged node);
       2. each variable has all its chunks (87,656/248 x 142,868/66 = 766,410);

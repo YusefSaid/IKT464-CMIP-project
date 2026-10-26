@@ -61,7 +61,7 @@ data/raw/SeaMask_WW3.mat
 
 **5. Run the notebooks:** `00_data_overview`, then `01_change_signal`. In the setup cell of `01_change_signal`, `VAR` selects the variable (`"hs"` wave height, `"wspd"` wind speed, `"tp"` peak period); use Restart and Run All after changing it. Figures go to `fig/`, tables to `data/processed/`.
 
-**6. Numbers for the report** (optional): `.venv/bin/python src/make_report_numbers.py` writes the key numbers and the regional table as LaTeX files.
+**6. Numbers for the report** (optional): `.venv/bin/python src/make_report_numbers.py --out results/report_numbers` writes the key numbers and the regional table as LaTeX files; upload them to `generated/` in the Overleaf project.
 
 ## Notes
 
