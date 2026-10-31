@@ -37,14 +37,21 @@ python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-**2. Data** (not included; provided by the MOREnergy Lab, Politecnico di Torino). Place the files as:
+**2. Data** (not included). The files were provided by the MOREnergy Lab (Politecnico di Torino) through
+a private share link; ask the lab for access. Download these files from the share and place them as follows:
 
-```
-data/raw/historical/EC-EARTH3.mat
-data/raw/ssp126/EC-EARTH3.mat
-data/raw/ssp585/EC-EARTH3.mat
-data/raw/SeaMask_WW3.mat
-```
+| File on the share                       | Place it as                          | Size              |
+|-----------------------------------------|--------------------------------------|-------------------|
+| `EC/Mat_Data/historical/EC-EARTH3.mat`  | `data/raw/historical/EC-EARTH3.mat`  | 59,982,783,406 B  |
+| `EC/Mat_Data/ssp126/EC-EARTH3.mat`      | `data/raw/ssp126/EC-EARTH3.mat`      | 60,656,201,821 B  |
+| `EC/Mat_Data/ssp585/EC-EARTH3.mat`      | `data/raw/ssp585/EC-EARTH3.mat`      | 60,874,380,344 B  |
+| `EC/SeaMask_WW3.mat`                    | `data/raw/SeaMask_WW3.mat`           | 248 KB            |
+
+The share shows sizes in GiB (55.86, 56.49 and 56.69). `src/scan_chunks.py` checks the files after download.
+The data are a MATLAB version of the public CMIP6 wave-climate ensemble of Meucci et al. (2024),
+https://doi.org/10.1038/s41597-024-02932-x (WAVEWATCH III forced by EC-Earth3, CDFAC = 1.08),
+available from the CSIRO Data Access Portal: http://hdl.handle.net/102.100.100/601698.
+CSIRO distributes the data as monthly NetCDF files, so the scripts here expect the MATLAB version.
 
 **3. Check the files** (lists damaged data blocks, if any, in `data/raw/<experiment>/bad_chunks.csv`)
 
